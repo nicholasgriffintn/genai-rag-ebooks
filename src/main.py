@@ -1,3 +1,5 @@
+from js import Response
+import logging
 import re
 
 def read_file(file_path):
@@ -36,10 +38,16 @@ def clean_text(paragraphs):
         Contents
 
         CHAPTER I.     Down the Rabbit-Hole
+        *      *      *      *      *      *      *
+
+        *      *      *      *      *      *      *
         """
     return [p for p in cleaned_paragraphs if p]
 
-def main():
+async def on_fetch(request, env):
+    logger = logging.getLogger(__name__)
+    logging.basicConfig(level=logging.INFO)
+    
     """
     TODO:
     
@@ -59,7 +67,5 @@ def main():
     for paragraph in cleaned_paragraphs[:5]:
         print(paragraph)
         print()
-
-
-if __name__ == "__main__":
-    main()
+        
+    return Response.new(200, 'text/plain', 'Done!')
