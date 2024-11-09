@@ -2,10 +2,6 @@ from js import Response
 import logging
 import re
 
-def read_file(file_path):
-    with open(file_path, 'r', encoding='utf-8') as file:
-        return file.read()
-
 def extract_main_content(text):
     start_marker = "*** START OF THE PROJECT GUTENBERG EBOOK ALICE'S ADVENTURES IN WONDERLAND ***"
     end_marker = "THE END"
@@ -46,7 +42,7 @@ def clean_text(paragraphs):
 
 async def on_fetch(request, env):
     logger = logging.getLogger(__name__)
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
     
     """
     TODO:
@@ -57,15 +53,22 @@ async def on_fetch(request, env):
     - Will need to build a simple frontend to interact with the chatbot.
     """
     
-    file_path = './data/alice-in-wonderland.txt'
-    text = read_file(file_path)
-    main_content = extract_main_content(text)
+    book_key = 'alice-in-wonderland'
+    logger.debug(f'Fetching book with key: {book_key}')
+    book_text = await env.BOOKS.get(book_key);
+    
+    if not book_text:
+        logger.debug('Book not found!')
+        return Response.new("Book not found!", status=404)
+    
+    logger.debug('Extracting main content...')
+    main_content = extract_main_content(book_text)
     paragraphs = split_into_paragraphs(main_content)
     cleaned_paragraphs = clean_text(paragraphs)
     
     # For now, just print the first few cleaned paragraphs
     for paragraph in cleaned_paragraphs[:5]:
-        print(paragraph)
-        print()
+        logger.debug(paragraph)
         
-    return Response.new(200, 'text/plain', 'Done!')
+    logger.debug('Done!')
+    return Response.new("Done!", status=200)
