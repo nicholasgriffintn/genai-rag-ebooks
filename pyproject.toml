@@ -5,6 +5,6 @@ description = "A chatbot project with RAG to chat with ebooks"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "js>=1.0",
+    "fastapi>=0.115.4",
     "requests>=2.32.3",
 ]

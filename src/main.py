@@ -1,54 +1,47 @@
-from js import Response
-from urllib.parse import urlparse, parse_qs
+from fastapi import FastAPI, Request
 import logging
-import re
 import requests
+import json
 
-def extract_main_content(text):
-    start_marker = "*** START OF THE PROJECT GUTENBERG EBOOK ALICE'S ADVENTURES IN WONDERLAND ***"
-    end_marker = "THE END"
-    
-    start_index = text.find(start_marker) + len(start_marker)
-    end_index = text.find(end_marker)
-    
-    return text[start_index:end_index]
-
-def split_into_paragraphs(text):
-    return text.split('\n\n')
-
-def clean_text(paragraphs):
-    cleaned_paragraphs = []
-    for paragraph in paragraphs:
-        # Remove unwanted patterns
-        paragraph = re.sub(r'\[.*?\]', '', paragraph)
-        paragraph = re.sub(r'\*{2,}', '', paragraph)
-        paragraph = re.sub(r'^\s*$', '', paragraph)
-        cleaned_paragraphs.append(paragraph.strip())
-        
-        """
-        TODO: Need to remove other initial content like:
-        Alice’s Adventures in Wonderland
-
-        by Lewis Carroll
-
-        THE MILLENNIUM FULCRUM EDITION 3.0
-
-        Contents
-
-        CHAPTER I.     Down the Rabbit-Hole
-        *      *      *      *      *      *      *
-
-        *      *      *      *      *      *      *
-        """
-    return [p for p in cleaned_paragraphs if p]
+from utils import extract_main_content, split_into_paragraphs, clean_text, read_file
 
 async def on_fetch(request, env):
+    import asgi
+
+    return await asgi.fetch(app, request, env)
+
+
+app = FastAPI()
+
+"""
+This is the homepage route, it will display the frontend.
+"""
+@app.get("/")
+async def homepage():
+    return {"message": "Hello, World!"}
+
+"""
+This is the request to begin the ingestion process.
+
+The process will:
+- Fetch the book from the cache.
+- Extract the main content.
+- Clean the text.
+- Query the model.
+- Save the vectors.
+
+TODO: Change this to a post
+
+Args:
+    req (Request): The request object.
+"""
+@app.get("/ingest")
+async def ingest(req: Request):
     try:
-        url = urlparse(request.url)
-        params = parse_qs(url.query)
+        env = req.scope['env']
         
         logger = logging.getLogger(__name__)
-        logging.basicConfig(level=logging.DEBUG)
+        logging.basicConfig(level=logging.INFO)
         
         """
         TODO:
@@ -59,43 +52,64 @@ async def on_fetch(request, env):
         - Will need to build a simple frontend to interact with the chatbot.
         """
         
+        if not env.BOOKS:
+            logger.info('Books cache not found!')
+            return {
+                "message": "Books cache not found!",
+                "status": 404
+            }
+        
         book_key = 'alice-in-wonderland'
-        logger.debug(f'Fetching book with key: {book_key}')
-        book_text = await env.BOOKS.get(book_key);
+        logger.info(f'Fetching book with key: {book_key}')
+        book_text = await env.BOOKS.get(book_key)
         
         if not book_text:
-            logger.debug('Book not found!')
-            return Response.new("Book not found!", status=404)
+            logger.info('Book not found!')
+            return {
+                "message": "Book not found!",
+                "status": 404
+            }
         
-        logger.debug('Extracting main content...')
+        logger.info('Extracting main content...')
         main_content = extract_main_content(book_text)
         paragraphs = split_into_paragraphs(main_content)
         cleaned_paragraphs = clean_text(paragraphs)
         joined_paragraphs = ' '.join(cleaned_paragraphs)
         
-        logger.debug("Querying model...")
+        logger.info("Querying model...")
         """
         TODO: This doesn't work, I don't know why.
         ERROR:main:AiError: 5006: must have required property 'text'
-        
-        ---
-        
+        """
+        """
         model = await env.AI.run(
             "@cf/baai/bge-large-en-v1.5",
+            { "text": [joined_paragraphs] },
             {
-                "text": ["hello"],
-            }
+                gateway: {
+                    id: "genai-rag-ebooks",
+                    skipCache: false,
+                    cacheTtl: 3360,
+                },
+            },
         )
         """
-        API_BASE_URL = "https://gateway.ai.cloudflare.com/v1/{env.ACCOUNT_ID}/genai-rag-ebooks/"
-        model_headers = {"Authorization": "Bearer {env.API_TOKEN}"}
+        API_BASE_URL = f"https://gateway.ai.cloudflare.com/v1/{env.ACCOUNT_ID}/genai-rag-ebooks/workers-ai/@cf/baai/bge-large-en-v1.5"
+        logger.info(f'API_BASE_URL: {API_BASE_URL}')
+        model_headers = {
+            "Authorization": f"Bearer {env.API_TOKEN}",
+            "Content-Type": "application/json"
+        }
         model_input = { "text": [joined_paragraphs] }
         model_response = requests.post(API_BASE_URL, headers=model_headers, json=model_input)
         model = model_response.json()
         
         if not model or not model['data']:
-            logger.debug('Model returned no data!')
-            return Response.new("Model returned no data.", status=404)
+            logger.info('Model returned no data!')
+            return {
+                "message": "Model returned no data!",
+                "status": 500
+            }
         
         vectors = []
         id = 1
@@ -107,12 +121,18 @@ async def on_fetch(request, env):
             })
             id += 1
             
-        logger.debug('Saving vectors...')
+        logger.info('Saving vectors...')
         inserted = await env.VECTORIZE.upsert(vectors)
-        logger.debug(f'Inserted: {inserted}')
+        logger.info(f'Inserted: {inserted}')
 
-        logger.debug('Done!')
-        return Response.new(inserted, status=200)
+        logger.info('Done!')
+        return {
+            "message": "Done!",
+            "status": 200
+        }
     except Exception as e:
         logger.error(e)
-        return Response.new("An error occurred!", status=500)
+        return {
+            "message": "Internal Server Error!",
+            "status": 500
+        }
