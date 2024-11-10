@@ -1,6 +1,8 @@
 from js import Response
+from urllib.parse import urlparse, parse_qs
 import logging
 import re
+import requests
 
 def extract_main_content(text):
     start_marker = "*** START OF THE PROJECT GUTENBERG EBOOK ALICE'S ADVENTURES IN WONDERLAND ***"
@@ -42,6 +44,9 @@ def clean_text(paragraphs):
 
 async def on_fetch(request, env):
     try:
+        url = urlparse(request.url)
+        params = parse_qs(url.query)
+        
         logger = logging.getLogger(__name__)
         logging.basicConfig(level=logging.DEBUG)
         
@@ -69,11 +74,28 @@ async def on_fetch(request, env):
         joined_paragraphs = ' '.join(cleaned_paragraphs)
         
         logger.debug("Querying model...")
-        model_prompt = {'text': [joined_paragraphs]}
+        """
+        TODO: This doesn't work, I don't know why.
+        ERROR:main:AiError: 5006: must have required property 'text'
+        
+        ---
+        
         model = await env.AI.run(
-            "@cf/baai/bge-base-en-v1.5",
-            model_prompt
+            "@cf/baai/bge-large-en-v1.5",
+            {
+                "text": ["hello"],
+            }
         )
+        """
+        API_BASE_URL = "https://gateway.ai.cloudflare.com/v1/{env.ACCOUNT_ID}/genai-rag-ebooks/"
+        model_headers = {"Authorization": "Bearer {env.API_TOKEN}"}
+        model_input = { "text": [joined_paragraphs] }
+        model_response = requests.post(API_BASE_URL, headers=model_headers, json=model_input)
+        model = model_response.json()
+        
+        if not model or not model['data']:
+            logger.debug('Model returned no data!')
+            return Response.new("Model returned no data.", status=404)
         
         vectors = []
         id = 1
